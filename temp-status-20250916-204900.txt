@@ -1,0 +1,1 @@
+todo_implement_responsive_design_cropping_overview.txt - Creating todo list for responsive design improvements

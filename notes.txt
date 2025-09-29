@@ -1,0 +1,5 @@
+Doublons détectés dans l'ajout des photos. 
+Possibilité d'utiliser la même photo dans plusieurs jours de publication différents
+option de zoom sur une image pour avoir la photo puiis une version zoomée. 
+La réorganisation dans les jours de publication ne fonctionnent pas très bien, dès qu'une photo est bougée dans son couloir, elle est systématiquement ajoutée au début de ce jour. 
+Split, rendre la ligne pointillées plus visible en la rendant blanc 100% et si c'est déjà le cas, plus grosse. 

@@ -1,0 +1,190 @@
+# --- Configuration ---
+# Chemin complet vers le dossier contenant votre code
+$targetDirectory = "C:\Users\Jean\Desktop\Code\publication-organizer" # <--- MODIFIÉ POUR CIBLER LE BON DOSSIER
+
+# Chemin complet vers le dossier où vous voulez enregistrer le fichier texte de sortie
+$outputBaseDirectory = "C:\Users\Jean\Desktop\Code\Copypastetemp"
+
+# Nom de base pour le fichier de sortie (sans date/heure ni extension)
+$outputBaseFileName = "export_publication_organizer_code"
+
+# Chemin vers le fichier dont vous voulez ajouter le contenu
+$structureFilePath = "C:\Users\Jean\Desktop\Code\publication-organizer\structureprogramme.txt" # Ce chemin est correct si le fichier est bien là
+
+# --- Génération dynamique du nom de fichier de sortie ---
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$outputFile = Join-Path -Path $outputBaseDirectory -ChildPath "$($outputBaseFileName)_$($timestamp).txt"
+
+# Liste des extensions de fichier à INCLURE (contenu complet OU juste listé)
+$extensionsToInclude = @("*.py", "*.js", "*.html", "*.css", "*.java", "*.cs", "*.php", "*.ts", "*.jsx", "*.tsx", "*.vue", "*.scss", "*.go", "*.rb", "*.c", "*.cpp", "*.h", "Dockerfile", "*.yml", "*.yaml", "*.json", "*.md")
+
+# Dossiers dont le CONTENU doit être exclu (mais leur existence listée)
+$relativePathsToExcludeContent = @("node_modules", "mongoose", "vendor", "cache", "logs")
+
+# Liste des dossiers/fichiers à EXCLURE COMPLÈTEMENT
+$pathsToExcludeCompletely = @(".git", "venv", ".vscode", "dist", "build", "__pycache__", "*.log", "*.tmp", "bin", "obj", ".idea", ".DS_Store", "nbproject")
+
+# --- Script d'exportation ---
+
+# Vérifier si le dossier cible existe
+if (-not (Test-Path $targetDirectory -PathType Container)) {
+    Write-Error "ERREUR : Le dossier cible '$targetDirectory' n'a pas été trouvé."
+    return
+}
+
+# Vérifier/Créer le dossier de sortie
+if (-not (Test-Path $outputBaseDirectory -PathType Container)) {
+    Write-Host "Création du dossier de sortie : $outputBaseDirectory"
+    try {
+        New-Item -Path $outputBaseDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Error "ERREUR : Impossible de créer le dossier de sortie '$outputBaseDirectory'. Erreur : $($_.Exception.Message)"
+        return
+    }
+}
+
+# --- Pré-calcul des chemins complets pour l'exclusion de contenu ---
+$fullPathPrefixesToExcludeContent = @()
+foreach ($relPath in $relativePathsToExcludeContent) {
+    $fullPath = Join-Path -Path $targetDirectory -ChildPath $relPath
+    if (Test-Path $fullPath -PathType Container) {
+        $fullPathPrefixesToExcludeContent += $fullPath + [System.IO.Path]::DirectorySeparatorChar
+    }
+}
+
+# Initialiser le StreamWriter
+$streamWriter = $null
+try {
+    $streamWriter = New-Object System.IO.StreamWriter($outputFile, $false, [System.Text.Encoding]::UTF8)
+
+    Write-Host "Initialisation du fichier de sortie : $outputFile"
+    $streamWriter.WriteLine("--- Début de l'exportation du code depuis '$targetDirectory' --- (Généré le $(Get-Date))")
+
+    # --- AJOUT DU CONTENU DE structureprogramme.txt ---
+    Write-Host "Vérification et ajout du fichier de structure : $structureFilePath"
+    if (Test-Path $structureFilePath -PathType Leaf) {
+        try {
+            $structureContent = Get-Content -Path $structureFilePath -Raw -Encoding UTF8 -ErrorAction Stop
+            $streamWriter.WriteLine()
+            $streamWriter.WriteLine("########################################")
+            $streamWriter.WriteLine("# Contenu de structureprogramme.txt    #")
+            $streamWriter.WriteLine("########################################")
+            $streamWriter.WriteLine()
+            $streamWriter.WriteLine($structureContent)
+            $streamWriter.WriteLine()
+            $streamWriter.WriteLine("--- Fin du contenu de structureprogramme.txt ---")
+            $streamWriter.WriteLine()
+            Write-Host " - Contenu de '$structureFilePath' ajouté au fichier de sortie." -ForegroundColor Cyan
+        } catch {
+            $errorMessage = "ERREUR lors de la lecture du fichier structure '$structureFilePath': $($_.Exception.Message)"
+            Write-Warning $errorMessage
+            $streamWriter.WriteLine()
+            $streamWriter.WriteLine("/!\\ $errorMessage /!\\")
+            $streamWriter.WriteLine()
+        }
+    } else {
+        $warningMessage = "ATTENTION: Le fichier structure '$structureFilePath' n'a pas été trouvé et n'a pas pu être inclus."
+        Write-Warning $warningMessage
+        $streamWriter.WriteLine()
+        $streamWriter.WriteLine("/!\\ $warningMessage /!\\")
+        $streamWriter.WriteLine()
+    }
+    # --- FIN DE L'AJOUT DU CONTENU ---
+
+    Write-Host "Recherche des fichiers avec extensions (@($extensionsToInclude -join ', ')) dans '$targetDirectory'..."
+    Write-Host "Exclusion complète des éléments correspondant à (@($pathsToExcludeCompletely -join ', '))..."
+
+    $filesToProcess = Get-ChildItem -Path $targetDirectory -Recurse -File -Include $extensionsToInclude -Exclude $pathsToExcludeCompletely -ErrorAction SilentlyContinue
+
+    Write-Host "Traitement de $($filesToProcess.Count) fichier(s) trouvé(s) correspondant aux filtres..."
+
+    $filesIncludedCount = 0
+    $filesContentExcludedCount = 0
+    $filesErrorCount = 0
+    $skippedFilePathsForSummary = [System.Collections.Generic.List[string]]::new() # MODIFIÉ: Liste pour stocker les chemins des fichiers sautés
+
+    foreach ($file in $filesToProcess) {
+        $filePath = $file.FullName
+        $relativeFilePath = if ($targetDirectory.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+                                $filePath.Substring($targetDirectory.Length)
+                            } else {
+                                $filePath.Substring($targetDirectory.Length + 1)
+                            }
+
+        $excludeContent = $false
+        foreach ($prefix in $fullPathPrefixesToExcludeContent) {
+            if ($filePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $excludeContent = $true
+                break
+            }
+        }
+
+        if ($excludeContent) {
+            $skippedFilePathsForSummary.Add($relativeFilePath) # MODIFIÉ: Ajouter à la liste au lieu d'écrire immédiatement
+            $filesContentExcludedCount++
+        } else {
+            # Uniquement pour les fichiers dont le contenu est INCLUS
+            $streamWriter.WriteLine()
+            $streamWriter.WriteLine("===============================")
+            $streamWriter.WriteLine(" Fichier: $relativeFilePath")
+            $streamWriter.WriteLine("===============================")
+            $streamWriter.WriteLine()
+            try {
+                $fileContent = Get-Content -Path $filePath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+                if ($null -eq $fileContent -and $file.Length -gt 0) {
+                     Write-Warning "Tentative de lecture de '$relativeFilePath' avec l'encodage par défaut car UTF-8 a échoué (ou fichier binaire)."
+                     $fileContent = Get-Content -Path $filePath -Raw -Encoding Default -ErrorAction Stop
+                } elseif ($null -eq $fileContent) {
+                    $fileContent = "" # Fichier vide
+                }
+
+                $streamWriter.WriteLine($fileContent)
+                $filesIncludedCount++ # Compter uniquement ceux dont le contenu est réellement inclus
+
+            } catch {
+                $errorMessage = "ERREUR LORS DE LA LECTURE DU FICHIER '$relativeFilePath': $($_.Exception.Message)"
+                Write-Warning $errorMessage
+                $streamWriter.WriteLine(" /!\\ $errorMessage /!\\")
+                $filesErrorCount++
+            }
+        }
+    }
+
+    # --- AJOUT DU RÉSUMÉ DES FICHIERS AU CONTENU EXCLU ---
+    if ($skippedFilePathsForSummary.Count -gt 0) {
+        $streamWriter.WriteLine()
+        $streamWriter.WriteLine("###################################################################")
+        $streamWriter.WriteLine("# Fichiers dont le contenu a été exclu (total: $($filesContentExcludedCount)) :    #")
+        $streamWriter.WriteLine("###################################################################")
+        $streamWriter.WriteLine()
+        # Joindre la liste avec des points-virgules et des espaces pour la lisibilité
+        $streamWriter.WriteLine(($skippedFilePathsForSummary -join "; "))
+        $streamWriter.WriteLine()
+    }
+    # --- FIN DU RÉSUMÉ ---
+
+    $streamWriter.WriteLine() # Espace avant la ligne de fin finale
+    $streamWriter.WriteLine("--- Fin de l'exportation du code ---")
+
+    Write-Host "----------------------------------------"
+    Write-Host "Exportation terminée !" -ForegroundColor Green
+    Write-Host " - $($filesIncludedCount) fichier(s) exporté(s) avec leur contenu."
+    Write-Host " - $($filesContentExcludedCount) fichier(s) listé(s) dans le résumé (contenu exclu, ex: node_modules)."
+    if ($filesErrorCount -gt 0) {
+        Write-Host " - $($filesErrorCount) fichier(s) ont rencontré une erreur de lecture." -ForegroundColor Yellow
+    }
+    Write-Host "Le fichier contenant le résultat est : $outputFile"
+
+} catch {
+    Write-Error "ERREUR GLOBALE lors de l'exportation : $($_.Exception.Message)"
+} finally {
+    if ($streamWriter -ne $null) {
+        try {
+            $streamWriter.Flush()
+            $streamWriter.Close()
+            $streamWriter.Dispose()
+        } catch {
+            Write-Warning "Avertissement: Erreur lors de la fermeture du StreamWriter. $($_.Exception.Message)"
+        }
+    }
+}

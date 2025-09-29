@@ -1,0 +1,7 @@
+- [x] Examine JavaScript scheduling logic to understand how publications are marked and moved
+- [x] Check calendar display functions to see why scheduled publications don't appear
+- [x] Verify right sidebar panel updates after scheduling
+- [x] Identify state management issues between scheduling, calendar, and sidebar
+- [ ] Test scheduling functionality to reproduce the issue
+- [x] Fix the data synchronization issues
+- [ ] Verify the fix resolves display problems
