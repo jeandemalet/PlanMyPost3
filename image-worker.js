@@ -4,78 +4,57 @@ const fse = require('fs-extra');
 const path = require('path');
 
 parentPort.on('message', async (task) => {
-    const { tempPath, originalTempPath, finalPath, thumbPath, thumbSize } = task;
-
-    // Définir les chemins pour les versions WebP
-    const finalWebpPath = finalPath.replace(path.extname(finalPath), '.webp');
-    const thumbWebpPath = thumbPath.replace(path.extname(thumbPath), '.webp');
+    const { tempPath, originalStoragePath, workingCopyPath, thumbPath, thumbSize } = task;
 
     try {
-        // Lecture unique du buffer pour optimiser la mémoire
         const imageBuffer = await fse.readFile(tempPath);
         const imageProcessor = sharp(imageBuffer);
         const metadata = await imageProcessor.metadata();
 
-        // Traitement parallèle optimisé
+        // 1. Déplacer le fichier original (rapide, pas de ré-encodage)
+        await fse.move(tempPath, originalStoragePath, { overwrite: true });
+
+        // 2. Créer la copie de travail (~85% qualité) et sa version WebP
+        const workingCopyPromise = sharp(imageBuffer)
+            .jpeg({ quality: 85, mozjpeg: true })
+            .toFile(workingCopyPath);
+
+        const workingCopyWebpPromise = sharp(imageBuffer)
+            .webp({ quality: 80 })
+            .toFile(workingCopyPath.replace(path.extname(workingCopyPath), '.webp'));
+
+        // 3. Créer la miniature UI (~40% qualité) et sa version WebP
+        const thumbnailPromise = sharp(imageBuffer)
+            .resize({ width: 400 }) // Redimensionner avant de compresser
+            .jpeg({ quality: 40, progressive: true })
+            .toFile(thumbPath);
+
+        const thumbnailWebpPromise = sharp(imageBuffer)
+            .resize({ width: 400 })
+            .webp({ quality: 50 })
+            .toFile(thumbPath.replace(path.extname(thumbPath), '.webp'));
+
+        // Exécuter toutes les créations en parallèle
         await Promise.all([
-            // Miniature JPEG avec letterboxing (fond blanc)
-            sharp(imageBuffer)
-                .resize(thumbSize, thumbSize, {
-                    fit: sharp.fit.contain, // Fait tenir l'image à l'intérieur du carré
-                    background: { r: 255, g: 255, b: 255, alpha: 1 } // Fond blanc
-                })
-                .jpeg({
-                    quality: 85,
-                    mozjpeg: true,
-                    progressive: true,
-                    optimizeScans: true
-                })
-                .toFile(thumbPath),
-
-            // Miniature WebP avec letterboxing (fond blanc)
-            sharp(imageBuffer)
-                .resize(thumbSize, thumbSize, {
-                    fit: sharp.fit.contain, // Fait tenir l'image à l'intérieur du carré
-                    background: { r: 255, g: 255, b: 255, alpha: 1 } // Fond blanc
-                })
-                .webp({
-                    quality: 75,
-                    effort: 6  // Meilleure compression
-                })
-                .toFile(thumbWebpPath),
-                
-            // Image principale WebP avec qualité optimisée
-            sharp(imageBuffer)
-                .webp({
-                    quality: 80,
-                    effort: 6  // Meilleure compression
-                })
-                .toFile(finalWebpPath),
-
-            // Déplacement du fichier original
-            fse.move(tempPath, finalPath, { overwrite: true })
+            workingCopyPromise,
+            workingCopyWebpPromise,
+            thumbnailPromise,
+            thumbnailWebpPromise
         ]);
 
         parentPort.postMessage({
             status: 'success',
-            finalPath,
+            originalStoragePath,
+            workingCopyPath,
             thumbPath,
-            finalWebpPath,      // Renvoyer le nouveau chemin
-            thumbWebpPath,      // Renvoyer le nouveau chemin
-            width: metadata.width,   // <-- AJOUT
-            height: metadata.height, // <-- AJOUT
-            originalTempPath
+            width: metadata.width,
+            height: metadata.height,
+            originalTempPath: tempPath // Renvoyer pour faire le lien
         });
 
     } catch (error) {
-        console.error(`[Worker] Error processing ${tempPath}:`, error);
-        parentPort.postMessage({
-            status: 'error',
-            message: error.message,
-            originalTempPath
-        });
-
-        // S'assurer de nettoyer le fichier temporaire en cas d'erreur
+        console.error(`[Worker] Erreur lors du traitement de ${tempPath}:`, error);
+        parentPort.postMessage({ status: 'error', message: error.message, originalTempPath: tempPath });
         await fse.unlink(tempPath).catch(() => {});
     }
 });

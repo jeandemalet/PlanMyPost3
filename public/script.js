@@ -4863,11 +4863,25 @@ class PublicationOrganizer {
             // Sélectionner la nouvelle galerie avec animation
             this.showGalleryPreview(newGallery._id, newGallery.name, true);
 
+            // --- NOUVELLE LOGIQUE DE NAVIGATION ---
+            // 1. Recharger la liste des galeries pour inclure la nouvelle
+            await this.loadGalleriesList();
+
+            // 2. Sélectionner la nouvelle galerie pour l'aperçu, mais SANS changer d'onglet
+            this.showGalleryPreview(newGallery._id, newGallery.name, true);
+
+            // 3. S'assurer que l'onglet "Galeries" reste (ou devient) actif
+            this.activateTab('galleries');
+
+            // 4. Si c'est la toute première galerie, la définir comme "galerie de travail" en arrière-plan
+            //    sans déclencher le chargement complet qui change d'onglet.
             if (!this.currentGalleryId) {
-                this.handleLoadGallery(newGallery._id);
-            } else {
-                this.activateTab('galleries');
+                this.currentGalleryId = newGallery._id;
+                localStorage.setItem('publicationOrganizer_lastGalleryId', this.currentGalleryId);
+                // On met à jour l'état de l'UI pour activer les boutons, mais on ne change pas de vue.
+                this.updateUIToNoGalleryState();
             }
+
             this.updateUIToNoGalleryState();
         } catch (error) {
             console.error("Erreur lors de la création de la galerie:", error);
@@ -5238,6 +5252,8 @@ class PublicationOrganizer {
                 }
             });
             if (!response.ok) throw new Error(`Erreur HTTP: ${response.status} - ${await response.text()}`);
+
+            // Mettre à jour l'UI
             delete this.galleryCache[galleryId];
             if (this.selectedGalleryForPreviewId === galleryId) {
                 this.clearGalleryPreview();
@@ -5265,7 +5281,18 @@ class PublicationOrganizer {
                 }
                 if (this.croppingPage) this.croppingPage.clearEditor();
             }
+
+            // RECHARGEMENT AUTOMATIQUE : Recharger la liste des galeries depuis le serveur
             await this.loadGalleriesList();
+
+            // NOUVELLE LOGIQUE : Essayer de sélectionner la première galerie de la nouvelle liste
+            const firstGalleryElement = this.galleriesListElement.querySelector('li[data-gallery-id]');
+            if (firstGalleryElement) {
+                const firstGalleryId = firstGalleryElement.dataset.galleryId;
+                const firstGalleryName = this.galleryCache[firstGalleryId] || 'Galerie';
+                this.showGalleryPreview(firstGalleryId, firstGalleryName);
+            }
+
             const galleryListItems = this.galleriesListElement.querySelectorAll('li');
             const noGalleriesLeft = galleryListItems.length === 0 || (galleryListItems.length === 1 && galleryListItems[0].textContent.includes("Aucune galerie"));
             if (noGalleriesLeft) {

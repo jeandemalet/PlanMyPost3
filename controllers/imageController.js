@@ -123,22 +123,25 @@ exports.uploadImages = async (req, res) => {
             } else {
                 filesToProcess.push(file);
 
-                // Préparer le document Mongoose
                 const timestamp = Date.now();
                 const safeOriginalName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-                const uniqueFilename = `${timestamp}-${safeOriginalName}`;
-                const relativePath = path.join(galleryId, uniqueFilename);
-                const thumbFilename = `thumb-${uniqueFilename}`;
-                const relativeThumbPath = path.join(galleryId, thumbFilename);
+
+                // NOUVEAU : Définir tous les chemins selon l'architecture à trois niveaux
+                const originalFilename = `original-${timestamp}-${safeOriginalName}`;
+                const workingFilename = `work-${timestamp}-${safeOriginalName}`;
+                const thumbFilename = `thumb-${timestamp}-${safeOriginalName}`;
 
                 imageDocsToCreate.push({
                     galleryId: galleryId,
                     originalFilename: correctedName,
-                    filename: uniqueFilename,
-                    path: relativePath,
-                    thumbnailPath: relativeThumbPath,
+
+                    // NOUVEAUX CHEMINS selon l'architecture à trois niveaux
+                    originalPath: path.join(galleryId, originalFilename), // Original 100%
+                    path: path.join(galleryId, workingFilename),           // Copie de travail ~85%
+                    thumbnailPath: path.join(galleryId, thumbFilename),   // Miniature UI ~40%
+
                     mimeType: file.mimetype,
-                    size: file.size
+                    size: file.size // Taille de l'original
                 });
             }
         });
@@ -152,24 +155,26 @@ exports.uploadImages = async (req, res) => {
             const doc = imageDocsToCreate[index];
             return runImageProcessingTask({
                 tempPath: file.path,
-                originalTempPath: file.path, // Garder une référence
-                finalPath: path.join(UPLOAD_DIR, doc.path),
+                // NOUVEAU : Passer les chemins de destination au worker selon la nouvelle architecture
+                originalStoragePath: path.join(UPLOAD_DIR, doc.originalPath),
+                workingCopyPath: path.join(UPLOAD_DIR, doc.path),
                 thumbPath: path.join(UPLOAD_DIR, doc.thumbnailPath),
-                thumbSize: THUMB_SIZE
+                thumbSize: 400 // Taille de la miniature UI optimisée
             });
         });
 
         // Attendre que TOUS les workers aient terminé
         const processingResults = await Promise.all(processingPromises);
 
-        // NOUVEAU : Mettre à jour les documents avec les chemins WebP
+        // Mettre à jour les documents avec les métadonnées (largeur, hauteur) du worker
         processingResults.forEach(result => {
             if (result.status === 'success') {
-                const docToUpdate = imageDocsToCreate.find(doc => path.join(UPLOAD_DIR, doc.path) === result.finalPath);
+                const docToUpdate = imageDocsToCreate.find(doc => path.join(UPLOAD_DIR, doc.path) === result.workingCopyPath);
                 if (docToUpdate) {
-                    docToUpdate.webpPath = path.relative(UPLOAD_DIR, result.finalWebpPath);
-                    docToUpdate.thumbnailWebpPath = path.relative(UPLOAD_DIR, result.thumbWebpPath);
-                    // AJOUTEZ CES DEUX LIGNES
+                    // Les chemins WebP sont générés automatiquement par le worker
+                    docToUpdate.webpPath = path.relative(UPLOAD_DIR, result.workingCopyPath.replace(path.extname(result.workingCopyPath), '.webp'));
+                    docToUpdate.thumbnailWebpPath = path.relative(UPLOAD_DIR, result.thumbPath.replace(path.extname(result.thumbPath), '.webp'));
+                    // Mettre à jour les métadonnées
                     docToUpdate.width = result.width;
                     docToUpdate.height = result.height;
                 }

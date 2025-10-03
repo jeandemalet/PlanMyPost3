@@ -19,11 +19,18 @@ const ImageSchema = new mongoose.Schema({
         required: true,
         unique: true // Assurer l'unicité du nom de fichier serveur
     },
-    path: { // Chemin relatif vers le fichier image complet (depuis UPLOAD_DIR)
+    // NOUVEAU: Chemin vers le fichier original non modifié (qualité 100%)
+    originalPath: {
         type: String,
         required: true
     },
-    thumbnailPath: { // Chemin relatif vers la miniature
+    // MODIFIÉ: Ce champ pointera désormais vers la "copie de travail" (qualité ~85%)
+    path: {
+        type: String,
+        required: true
+    },
+    // MODIFIÉ: Ce champ pointera vers la miniature ultra-optimisée (qualité ~40%)
+    thumbnailPath: {
         type: String,
         required: true
     },

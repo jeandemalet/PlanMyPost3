@@ -268,12 +268,13 @@ exports.exportPublicationImagesAsZip = async (req, res) => {
                 
         // --- FIN DE LA NOUVELLE LOGIQUE ---
         
-        // Boucle pour ajouter les images (code existant, inchangé)
+        // Boucle pour ajouter les images avec qualité maximale (originale)
         for (let i = 0; i < publication.images.length; i++) {
             const imageEntry = publication.images[i];
-            if (imageEntry.imageId && imageEntry.imageId.path) {
+            if (imageEntry.imageId && imageEntry.imageId.originalPath) {
                 const imageDoc = imageEntry.imageId;
-                const filePath = path.join(UPLOAD_DIR, imageDoc.path);
+                // MODIFICATION : Utiliser originalPath pour la meilleure qualité
+                const filePath = path.join(UPLOAD_DIR, imageDoc.originalPath);
 
                 if (fs.existsSync(filePath)) {
                     const position = String(i + 1).padStart(2, '0');
@@ -281,7 +282,17 @@ exports.exportPublicationImagesAsZip = async (req, res) => {
                     const filenameInZip = `${sanitizedGalleryName} - Publication ${publication.letter} - ${position} - Plan My Post${extension}`;
                     archive.file(filePath, { name: filenameInZip });
                 } else {
-                    console.warn(`File not found, skipping: ${filePath}`);
+                    console.warn(`Fichier original non trouvé, fallback vers copie de travail: ${filePath}`);
+                    // Fallback vers la copie de travail si l'original n'existe pas
+                    const fallbackPath = path.join(UPLOAD_DIR, imageDoc.path);
+                    if (fs.existsSync(fallbackPath)) {
+                        const position = String(i + 1).padStart(2, '0');
+                        const extension = path.extname(imageDoc.originalFilename) || '.jpg';
+                        const filenameInZip = `${sanitizedGalleryName} - Publication ${publication.letter} - ${position} - Plan My Post${extension}`;
+                        archive.file(fallbackPath, { name: filenameInZip });
+                    } else {
+                        console.warn(`Ni original ni copie de travail trouvés pour l'image: ${imageDoc.originalFilename}`);
+                    }
                 }
             }
         }
